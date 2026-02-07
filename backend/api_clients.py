@@ -668,11 +668,6 @@ def create_api_clients():
     }
 
 
-def detect_mock_mode(api_clients):
-    """Returns True if Claude client is not available (text generation is mocked)."""
-    return not api_clients["claude"].is_available
-
-
 def get_available_apis(api_clients):
     """Return a dict of API name → availability boolean."""
     return {name: client.is_available for name, client in api_clients.items()}

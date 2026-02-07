@@ -13,19 +13,17 @@ import logging
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
-from api_clients import create_api_clients, detect_mock_mode, get_available_apis
+from api_clients import create_api_clients, get_available_apis
 from content_engine import (
     compute_engagement_score,
     sanitize_time_data,
     select_strategy,
     generate_initial_content,
-    generate_initial_content_live,
     generate_content_blocks,
-    generate_content_blocks_live,
     validate_response,
     validate_initial_response,
 )
-from topic_graph import slugify, get_node, NODES
+from topic_graph import slugify
 
 logger = logging.getLogger(__name__)
 
@@ -41,16 +39,13 @@ def create_app(testing=False):
 
     # Create API clients
     api_clients = create_api_clients()
-    mock_mode = detect_mock_mode(api_clients)
 
-    if mock_mode:
-        logger.info("Running in MOCK mode (no Anthropic API key)")
+    if not api_clients["claude"].is_available:
+        logger.warning("ANTHROPIC_API_KEY not set — content generation will fail")
     else:
         logger.info("Running in LIVE mode (Claude orchestration active)")
 
-    # Store on app for access in routes and tests
     app.api_clients = api_clients
-    app.mock_mode = mock_mode
 
     # ── Input validation helpers ──────────────────────────────────────
 
@@ -81,7 +76,6 @@ def create_app(testing=False):
     def health():
         return jsonify({
             "status": "ok",
-            "mock_mode": app.mock_mode,
             "available_apis": get_available_apis(app.api_clients),
         })
 
@@ -96,10 +90,13 @@ def create_app(testing=False):
             return err
 
         try:
-            if app.mock_mode:
-                result = generate_initial_content(topic)
-            else:
-                result = generate_initial_content_live(topic, app.api_clients)
+            if not app.api_clients["claude"].is_available:
+                return jsonify({"error": "Claude API key not configured. Set ANTHROPIC_API_KEY."}), 503
+
+            result = generate_initial_content(topic, app.api_clients)
+
+            if result is None:
+                return jsonify({"error": "Content generation failed — Claude returned no content"}), 502
 
             errors = validate_initial_response(result)
             if errors:
@@ -148,19 +145,20 @@ def create_app(testing=False):
             topic_id = slugify(current_node)
 
             # Generate content
-            if app.mock_mode:
-                content_blocks, next_nodes = generate_content_blocks(
-                    topic_id, strategy, visited_nodes
-                )
-            else:
-                content_blocks, next_nodes = generate_content_blocks_live(
-                    topic_id=topic_id,
-                    strategy=strategy,
-                    visited_nodes=visited_nodes,
-                    last_paragraph=last_paragraph,
-                    engagement_score=engagement_score,
-                    api_clients=app.api_clients,
-                )
+            if not app.api_clients["claude"].is_available:
+                return jsonify({"error": "Claude API key not configured. Set ANTHROPIC_API_KEY."}), 503
+
+            content_blocks, next_nodes = generate_content_blocks(
+                topic_id=topic_id,
+                strategy=strategy,
+                visited_nodes=visited_nodes,
+                last_paragraph=last_paragraph,
+                engagement_score=engagement_score,
+                api_clients=app.api_clients,
+            )
+
+            if content_blocks is None:
+                return jsonify({"error": "Content generation failed — Claude returned no content"}), 502
 
             result = {
                 "content_blocks": content_blocks,

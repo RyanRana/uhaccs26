@@ -74,7 +74,11 @@ ALL_TOPICS = [
 def print_header(app):
     """Print mode and API availability."""
     apis = get_available_apis(app.api_clients)
-    mode = f"{RED}MOCK{RESET}" if app.mock_mode else f"{GREEN}LIVE (Claude orchestrating){RESET}"
+    claude_available = app.api_clients["claude"].is_available
+    if claude_available:
+        mode = f"{GREEN}LIVE (Claude orchestrating){RESET}"
+    else:
+        mode = f"{RED}NO CLAUDE KEY — will fail{RESET}"
 
     api_str = ""
     for name, avail in apis.items():
@@ -128,7 +132,7 @@ def print_blocks(data, label):
                 url = media.get("url", "")
                 source = media.get("source", "")
                 # Show a short version of the URL
-                short_url = url.split("?")[0][-60:] if url else ""
+                short_url = url.split("?")[0] if url else ""
                 extra = ""
                 if media.get("title"):
                     extra = f' — "{truncate(media["title"], 50)}"'
@@ -216,6 +220,12 @@ def main():
 
     # Create app and client
     app = create_app(testing=False)
+
+    if not app.api_clients["claude"].is_available:
+        print(f"{RED}ERROR: ANTHROPIC_API_KEY is not set. Demo requires a live Claude API key.{RESET}")
+        print(f"{DIM}Set it in .env or export ANTHROPIC_API_KEY=sk-...{RESET}")
+        sys.exit(1)
+
     client = app.test_client()
 
     print_header(app)
